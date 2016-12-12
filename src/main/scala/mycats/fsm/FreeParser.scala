@@ -4,41 +4,36 @@ import cats._
 import cats.free.Free
 import cats.free.Free._
 
-import scalaz.effect.IO
-
 /**
   * Created by Bondarenko on 12/12/16.
   */
-object FreeParser extends App{
+object FreeParser extends App with Utils{
 
-  println(test("123-12\n"))
+  doWhile(_ != "exit") {
+    isValid
+  }
 
-  def test(s: String) = {
-    s.toStream.foldLeft[NextState](InitState("i") -> true){ (state, ch) =>
-      val (nextState, valid) = parser(state._1, ch).foldMap(RealInterpreter)
-      p((nextState, valid && state._2, ch))
+  def isValid(s: String): Boolean = test(s)._2
+
+  def test(s: String): (ParserState, Boolean) = runWith(s)(RealInterpreter)
+
+  def runWith(s: String)(interpreter: Interpreter) = {
+    s.toStream.foldLeft[NextState](InitState() -> true){ (state, ch) =>
+      val (nextState, valid) = parser(state._1, ch).foldMap(interpreter)
       (nextState, valid && state._2)
     }
   }
 
-  def p[T](t: =>T): T = {
-    println(t)
-    t
-  }
-
-  import Helpers.CondHelper
-  import Helpers.FreeHelper
-  import Helpers.A
-  import Helpers.B
+  import Helpers.{CondHelper, Equality, FreeHelper, Or}
 
   def parser(s: ParserState, ch: Ch): Free[Transition, NextState] = for {
-    s0 <- ((InitState(B(s)) && IsDigit(ch)) ~~> DigitsState("d")).lift()
-    s1 <- ((DigitsState(B(s)) && IsDigit(ch)) ~~> DigitsState("d")).lift()
-    s2 <- ((DigitsState(B(s)) && IsOp(ch)) ~~> OpState("o")).lift()
-    s3 <- ((DigitsState(B(s)) && IsEnd(ch)) ~~> FinalState("f")).lift()
-    s4 <- ((OpState(B(s)) && IsDigit(ch)) ~~> DigitsState("d")).lift()
-    s5 <- (FinalState(B(s)) ~~> FinalState("f")).lift()
-    error <- (ErrorState(B(s)) ~~> ErrorState("e")).lift()
+    s0 <- (( (s is InitState()) && IsDigit(ch)) ~~> DigitsState()).lift()
+    s1 <- (( (s is DigitsState()) && IsDigit(ch)) ~~> DigitsState()).lift()
+    s2 <- (( (s is DigitsState()) && IsOp(ch)) ~~> OpState()).lift()
+    s3 <- (( (s is DigitsState()) && IsEnd(ch)) ~~> FinalState()).lift()
+    s4 <- (( (s is OpState()) && IsDigit(ch)) ~~> DigitsState()).lift()
+    s5 <- (  (s is FinalState()) ~~> FinalState()).lift()
+    error <- (ErrorState() ~~> ErrorState()).lift()
   } yield s0 | s1 | s2 | s3 | s4 | s5 | error
 
 
@@ -48,6 +43,7 @@ object FreeParser extends App{
   type Chars = Stream[Ch]
 
   //ADT
+  type Interpreter = (Transition ~> Id)
   type NextState = (ParserState, Boolean)
   type CONDITION = Transition[Boolean]
   sealed trait Transition[A]
@@ -56,12 +52,13 @@ object FreeParser extends App{
   case class IsDigit(ch: Ch) extends Condition
   case class IsOp(ch: Ch) extends Condition
   case class IsEnd(ch: Ch) extends Condition
-  case class DigitsState(s: String) extends ParserState
-  case class OpState(s: String) extends ParserState
-  case class InitState(s: String) extends ParserState
-  case class FinalState(s: String) extends ParserState
-  case class ErrorState(s: String) extends ParserState
+  case class DigitsState() extends ParserState
+  case class OpState() extends ParserState
+  case class InitState() extends ParserState
+  case class FinalState() extends ParserState
+  case class ErrorState() extends ParserState
   case class And(c1: Condition, c2: Condition) extends Condition
+  case class Is(c1: ParserState, c2: ParserState) extends Condition
   case class Then(c: Condition, next: ParserState) extends Transition[NextState]
 
   type Cond[A] = Free[Transition, A]
@@ -72,18 +69,19 @@ object FreeParser extends App{
       case IsDigit(ch) => isDigit(ch)
       case IsOp(ch) => isOp(ch)
       case IsEnd(ch) => isEnd(ch)
-      case DigitsState(s) => s == "d"
-      case OpState(s) => s == "o"
-      case InitState(s) => s == "i"
-      case FinalState(s) => s == "f"
-      case ErrorState(s) => false
+      case DigitsState() => true
+      case OpState() => true
+      case InitState() => true
+      case FinalState() => true
+      case ErrorState() => false
+      case Is(c1, c2) => c1 == c2
       case And(c1, c2) => apply(c1).asInstanceOf[Boolean] && apply(c2).asInstanceOf[Boolean]
       case Then(c, next) => (next, apply(c).asInstanceOf[Boolean])
 
     }
   }
   def isDigit(ch: Ch): Boolean = "[0-9]".r.pattern.asPredicate().test(ch.toString)
-  def isOp(ch: Ch): Boolean = "[+-]|\\*".r.pattern.asPredicate().test(ch.toString)
+  def isOp(ch: Ch): Boolean = "[+-]|\\*|\\/".r.pattern.asPredicate().test(ch.toString)
   def isEnd(ch: Ch): Boolean = ch == '\n'
   def a = InitState -> true
 
@@ -98,25 +96,13 @@ object FreeParser extends App{
       def lift() = liftF[Transition, NextState](t)
     }
 
-    implicit class A(s1: NextState) {
+    implicit class Or(s1: NextState) {
       def |(s2: NextState): NextState = if(s1._2) s1 else s2
     }
 
-    implicit object B {
-      def apply(s: String): ParserState = s match {
-        case "i" => InitState("i")
-        case "d" => DigitsState("d")
-        case "o" => OpState("o")
-        case "f" => FinalState("f")
-      }
+    implicit class Equality(state: ParserState) {
 
-      def apply(s: ParserState) = s match {
-        case DigitsState(s) => "d"
-        case OpState(s) => "o"
-        case InitState(s) => "i"
-        case FinalState(s) => "f"
-        case ErrorState(s) => "e"
-      }
+      def is(s: ParserState): Is = Is(s, state)
     }
   }
 

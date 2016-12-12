@@ -6,19 +6,10 @@ import scala.io._
 /**
   * Created by Bondarenko on 12/11/16.
   */
-object Parser extends App{
+object Parser extends App with Utils{
 
-  Stream.continually(sample().unsafePerformIO())
-    .takeWhile(_ != "Bye").foreach(println(_))
+  doWhile(_ != "q")(ok)
 
-  def sample(): IO[String] = {
-    IO{
-      StdIn.readLine()
-    }.map{ s =>
-      if(s == "q") "Bye"
-      else accepts(InitState(s"$s\n".toStream)).toString
-    }
-  }
 
   def p[T](f: =>T) = {
     println(f)
@@ -40,6 +31,7 @@ object Parser extends App{
   def isOp(ch: CH): Boolean = "[+-]|\\*".r.pattern.asPredicate().test(ch.toString)
   def isEnd(ch: CH): Boolean = ch == '\n'
 
+  def ok(s: String): Boolean = accepts(InitState(s"$s\n".toStream))
 
   def accepts(s: ParserState): Boolean = {
     s match {
