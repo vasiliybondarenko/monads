@@ -12,9 +12,29 @@ import scalaz.effect.IO
   */
 object Files extends App{
 
-  val result = program.foldMap(FakeInterpreter).unsafePerformIO()
+  val result = program1.foldMap(FakeInterpreter).unsafePerformIO()
+
+
 
   println(s"RESULT: $result")
+
+  def program1: Free[FileOperation, IO[Unit]] =
+    liftF[FileOperation, List[String]](Read("test.txt")).flatMap{ lines =>
+      liftF[FileOperation, Option[String]](Find(lines, "Hardwired")).flatMap{ found =>
+        liftF[FileOperation, IO[Unit]](Show(found.getOrElse(""))).flatMap{ io =>
+          Free.pure(io)
+        }
+      }
+    }
+
+  def program2: Free[FileOperation, IO[Unit]] =
+    read("test.txt").flatMap{ lines =>
+      find(lines, "hardwired").flatMap{ found =>
+        show(found.getOrElse("")).flatMap{ io =>
+          Free.pure(io)
+        }
+      }
+    }
 
   def program: Free[FileOperation, IO[Unit]] = for {
     lines <- read("test.txt")
